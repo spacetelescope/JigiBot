@@ -134,7 +134,8 @@ def create_issues(issue_file, jirarepo, jirauser, jirapass, gitkey):
                     new_issue = j.jira.create_issue(project='DATJPP',
                                                     summary=git_issue.title,
                                                     description=descrip,
-                                                    issuetype={'name': 'Task'})
+                                                    issuetype={'name': 'Task'},
+                                                    priority={'name': 'Minor'})
                     
                     # Write new jira/github issue pair to issue file
                     iss_file.write(f'{new_issue.key} {repo_name}/issues/{git_issue.number}\n')
