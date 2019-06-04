@@ -1,7 +1,9 @@
 import os
 import sys
 import argparse
-import datetime 
+import datetime
+
+from github import Github
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -14,7 +16,7 @@ __all__ = ['JPSync']
 
 
 
-def jda_jgbot(issues, jirarepo, jirauser, jirapass, gitkey):
+def jpp_jgbot(issues, jirarepo, jirauser, jirapass, gitkey):
 
     # code for testing a specific issue
     # sync the issues between the two projects 
@@ -38,6 +40,7 @@ def jda_jgbot(issues, jirarepo, jirauser, jirapass, gitkey):
 
 
 class JPSync(IssueSync):
+    # Editing this to only sync one direction, github to jira
 
     def comments(self):
         if 'comments' not in self.differences:
@@ -55,11 +58,13 @@ class JPSync(IssueSync):
                if body.strip() not in jira_comments_body:
                   self.jira.add_comment(f'Comment by {g.user.name}: {g.body}')
 
+        '''
         for j in jira_comments:
             if j.author.name not in ['stsci.jgbot@gmail.com']:
                body = f'Comment by {j.author.displayName}: {j.body}'
                if body.strip() not in github_comments_body:
                   self.github.add_comment(body)
+        '''
 
 
     def status(self):
@@ -75,10 +80,12 @@ class JPSync(IssueSync):
                  if jira_status not in ['Done']:
                      logging.info('moving {} to Done'.format(self.jira_id))
                      self.jira.change_status('Done')
+            '''
             # If the jira issue is resolved or done, close the github issue
             if jira_status in ['Done']:
                  if github_status is not 'closed':
                       self.github.change_status('closed')
+            '''
 
 
 class lock:
@@ -96,55 +103,44 @@ class lock:
        
         
 
-def create_issues(issues, jirarepo, jirauser, jirapass, gitkey):
+def create_issues(issue_file, jirarepo, jirauser, jirapass, gitkey):
     """Check Jira and open any new issues in GitHub
+       Check Github and open any new issues in Jira
     """
-    repo_list = ['imexam', 'specviz', 'mosviz', 'stginga', 'astroimtools',
-                 'cubeviz', 'gwcs', 'tweakwcs', 'jwst', 'da5-notebooks']
     j = JiraQuery(jirarepo, user=jirauser, password=jirapass)
+    repo_list = ['jdaviz']
+    g = Github(gitkey)
+    
+    with open(issue_file, mode='r') as iss_file:
+        issues = iss_file.readlines()
 
-    # Add any new issues determine the issues that are open
-    jira_issues = [x.split()[0] for x in issues]
-    for i in j.jira.search_issues('Project="JDA" AND Type="Bug"'):
-        # check those issues against the list
-        if i.key not in jira_issues:
+    git_issue_numbers = [int(x.split()[1].split("/")[2]) for x in issues]
+    jira_issue_numbers = [x.split()[0] for x in issues]
 
+    with open(issue_file, mode='a') as iss_file:
+        for repo_name in repo_list:
+            repo = g.get_repo(f'spacetelescope/{repo_name}')
+            all_git_issues = repo.get_issues(state='all',since=datetime.datetime(2019,4,25,0,0))
 
-           j.issue = i.key
+            for git_issue in all_git_issues:
+                if git_issue.number not in git_issue_numbers and git_issue.pull_request == None:
 
-           # skip issues that have been created for the report
-           if j.issue.fields.issuetype.name == 'Software' or j.issue.fields.issuetype.name == 'Report':
-              continue
+                    print(f"working on github issues number {git_issue.number}")
 
-
-           repo = set([r.name for r in j.issue.fields.components]).intersection(repo_list)
-           print(repo)
-
-           if repo:
-              repo = repo.pop()
-              g = GithubQuery(f'spacetelescope/{repo}', gitkey)
-           else:
-              continue
-              
-           if j.issue.fields.description:
-              description = j.issue.fields.description
-           else:
-              description = j.issue.fields.summary
-           body = f'Issue [{i.key}]({j.issue.permalink()}) was created by {j.issue.fields.creator}:\n\n{description}'
-           # if they are not in the list, create an issue in github, 
-           gid = g.repo.create_issue(j.issue.fields.summary, body=body)
-           print(gid)
-           # add to list and then write it back out
-           with open(args.issue_list, 'a') as fout:
-                fout.write(f'{i.key} {repo}/issues/{gid.number}\n')
-           # add a comment to the JP project with a link back
-           j.add_comment(f'This ticket is now being tracked by SCSB at [#{gid.number}|https://github.com/spacetelescope/{repo}/issues/{gid.number}]')
-           # add the jira label to the github issue
-           g.issue = gid.number
-           g.issue.add_to_labels('jira')
-           g.issue.add_to_labels('bug')
-
-
+                    descrip = f'This issue was created by JigiBot, [original github issue|{git_issue.html_url}] was created by github user {git_issue.user.login}\nPlease do not leave comments in this issue, all interaction should happen on the [original github issue|{git_issue.html_url}]. This JIRA issue is for sprint tracking:\n\n'
+                    descrip += git_issue.body
+                
+                    # Create new jira issue
+                    new_issue = j.jira.create_issue(project='DATJPP',
+                                                    summary=git_issue.title,
+                                                    description=descrip,
+                                                    issuetype={'name': 'Task'})
+                    
+                    # Write new jira/github issue pair to issue file
+                    iss_file.write(f'{new_issue.key} {repo_name}/issues/{git_issue.number}\n')
+                    
+                    # add a comment to the github issue with a link back to jira
+                    git_issue.create_comment(f'This ticket is now being tracked at [{new_issue.key}]({new_issue.permalink()})')
 
 if __name__=='__main__':
     gituser = os.environ['GITUSER']
@@ -172,9 +168,8 @@ if __name__=='__main__':
     issues = open(args.issue_list).readlines()
 
     # create new issues that are produced
-    create_issues(issues, jirarepo, jirauser, jirapass, gitkey)
+    create_issues(args.issue_list, jirarepo, jirauser, jirapass, gitkey)
         
-    # prodcess for syning issues
-    jda_jgbot(issues, jirarepo, jirauser, jirapass, gitkey)
-
+    # process for syning issues
+    jpp_jgbot(issues, jirarepo, jirauser, jirapass, gitkey)
 
