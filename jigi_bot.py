@@ -30,7 +30,7 @@ def jpp_jgbot(issues, jirarepo, jirauser, jirapass, gitkey):
     for l in issues:
         jid, gid = l.split()
         repo, gid = gid.split('/issues/')
-        g = GithubQuery(f'spacetelescope/{repo}', gitkey)
+        g = GithubQuery(f'{repo}', gitkey)
 
         sync = JPSync(g, j, gid, jid)
         sync.status()
@@ -108,19 +108,19 @@ def create_issues(issue_file, jirarepo, jirauser, jirapass, gitkey):
        Check Github and open any new issues in Jira
     """
     j = JiraQuery(jirarepo, user=jirauser, password=jirapass)
-    repo_list = ['jdaviz']
+    repo_list = ['astropy/specutils']
     g = Github(gitkey)
     
     with open(issue_file, mode='r') as iss_file:
         issues = iss_file.readlines()
 
-    git_issue_numbers = [int(x.split()[1].split("/")[2]) for x in issues]
+    git_issue_numbers = [int(x.split()[1].split("/")[-1]) for x in issues]
     jira_issue_numbers = [x.split()[0] for x in issues]
 
     with open(issue_file, mode='a') as iss_file:
         for repo_name in repo_list:
-            repo = g.get_repo(f'spacetelescope/{repo_name}')
-            all_git_issues = repo.get_issues(state='all',since=datetime.datetime(2019,4,25,0,0))
+            repo = g.get_repo(f'{repo_name}')
+            all_git_issues = repo.get_issues(state='all', labels=[repo.get_label('sflag')])
 
             for git_issue in all_git_issues:
                 if git_issue.number not in git_issue_numbers and git_issue.pull_request == None:
@@ -131,7 +131,7 @@ def create_issues(issue_file, jirarepo, jirauser, jirapass, gitkey):
                     descrip += git_issue.body
                 
                     # Create new jira issue
-                    new_issue = j.jira.create_issue(project='DATJPP',
+                    new_issue = j.jira.create_issue(project='JDAT',
                                                     summary=git_issue.title,
                                                     description=descrip,
                                                     issuetype={'name': 'Task'},
